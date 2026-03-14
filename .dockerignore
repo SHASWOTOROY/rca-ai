@@ -1,0 +1,33 @@
+# Node modules (rebuilt inside container)
+node_modules
+*/node_modules
+
+# Vite build cache
+frontend/.vite
+frontend/dist
+
+# Env files — pass secrets via docker-compose environment instead
+.env
+**/.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Editor
+.vscode
+.cursor
+*.md
+
+# Python venv from ai-service
+ai-service/venv
+ai-service/__pycache__
+ai-service/*.pyc

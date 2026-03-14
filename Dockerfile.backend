@@ -1,0 +1,24 @@
+# ── Backend — Node.js 22 (matches your local setup) ──────────────────────────
+FROM node:22-alpine
+
+# Install curl for health check
+RUN apk add --no-cache curl
+
+WORKDIR /app
+
+# Copy dependency manifests first for better layer caching
+COPY backend/package*.json ./
+
+# Install only production dependencies
+RUN npm ci --omit=dev
+
+# Copy backend source (server.js, .env.example etc.)
+COPY backend/ ./
+
+EXPOSE 3001
+
+# Health check — uses the /health endpoint defined in server.js
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3001/health || exit 1
+
+CMD ["node", "server.js"]
