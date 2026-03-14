@@ -100,57 +100,71 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ─── OpenRouter/OpenAI helper with automatic retry ───────────────────────────
-async function callOpenAI(messages, { maxRetries = 2 } = {}) {
+// ─── OpenRouter/OpenAI helper — primary + fallback model with auto-retry ─────
+// Model order: gpt-4o-mini first, then a free fallback if it fails.
+const AI_MODELS = [
+  'openai/gpt-4o-mini',
+  'meta-llama/llama-3.1-8b-instruct:free',  // free fallback on OpenRouter
+];
+
+async function callOpenAI(messages) {
   const key = process.env.OPENAI_API_KEY;
   if (!key || key === 'PUT_YOUR_OPENAI_KEY_HERE') {
     throw new Error('AI key not configured — add OPENAI_API_KEY to backend/.env');
   }
 
   let lastErr;
-  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-    try {
-      const response = await axios.post(
-        'https://openrouter.ai/api/v1/chat/completions',
-        { model: 'openai/gpt-4o-mini', messages, temperature: 0.2 },
-        {
-          headers: {
-            Authorization:  `Bearer ${key}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer':  'http://localhost:3001',
-            'X-Title':       'RCA Analysis Tool',
+
+  for (const model of AI_MODELS) {
+    // Each model gets 2 attempts (1 retry on transient failure)
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(`[AI] Trying model=${model} attempt=${attempt}`);
+        const response = await axios.post(
+          'https://openrouter.ai/api/v1/chat/completions',
+          { model, messages, temperature: 0.2 },
+          {
+            headers: {
+              Authorization:  `Bearer ${key}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer':  'http://localhost:3001',
+              'X-Title':       'RCA Analysis Tool',
+            },
+            timeout: 60000,
           },
-          timeout: 60000,
-        },
-      );
+        );
 
-      const content = response.data?.choices?.[0]?.message?.content;
-      if (!content) throw new Error('AI returned an empty response — please try again.');
-      return content;
+        const content = response.data?.choices?.[0]?.message?.content;
+        if (!content) throw new Error('AI returned an empty response — please try again.');
+        if (model !== AI_MODELS[0]) console.log(`[AI] Responded via fallback model: ${model}`);
+        return content;
 
-    } catch (err) {
-      lastErr = err;
-      const status = err.response?.status;
-      const apiMsg = err.response?.data?.error?.message
-                  || err.response?.data?.error
-                  || err.message;
+      } catch (err) {
+        lastErr = err;
+        const status = err.response?.status;
+        const apiMsg = err.response?.data?.error?.message
+                    || err.response?.data?.error
+                    || err.message;
 
-      // Don't retry on auth / bad-request errors — these won't self-heal
-      if (status === 401) throw new Error('Invalid API key. Check OPENAI_API_KEY in backend/.env');
-      if (status === 403) throw new Error('API key forbidden. Check your OpenRouter account/credits.');
-      if (status === 400) throw new Error(`Bad request to AI: ${apiMsg}`);
+        // Auth / billing errors — no point retrying any model
+        if (status === 401) throw new Error('Invalid API key. Check OPENAI_API_KEY in backend/.env');
+        if (status === 403) throw new Error('API key forbidden — check your OpenRouter account/credits.');
+        if (status === 400) throw new Error(`Bad AI request: ${apiMsg}`);
 
-      if (attempt <= maxRetries) {
-        const delay = attempt * 1500; // 1.5 s, then 3 s
-        console.warn(`[AI] Attempt ${attempt} failed (${status ?? 'network'}: ${apiMsg}) — retrying in ${delay}ms…`);
-        await new Promise(r => setTimeout(r, delay));
-      } else {
-        console.error(`[AI] All ${maxRetries + 1} attempts failed. Last error: ${apiMsg}`);
+        console.warn(`[AI] model=${model} attempt=${attempt} failed — ${status ?? 'network'}: ${apiMsg}`);
+
+        if (attempt === 1) {
+          // Brief pause before retry
+          await new Promise(r => setTimeout(r, 1500));
+        }
+        // If attempt 2 also failed, fall through to next model
       }
     }
+    // Both attempts for this model failed — try next model immediately
+    console.warn(`[AI] model=${model} exhausted, trying next model…`);
   }
 
-  // Produce a clean user-facing message from the last error
+  // All models failed — give a clean user-facing error
   const status = lastErr?.response?.status;
   const apiMsg = lastErr?.response?.data?.error?.message
               || lastErr?.response?.data?.error
@@ -158,7 +172,7 @@ async function callOpenAI(messages, { maxRetries = 2 } = {}) {
               || 'Unknown error';
 
   if (status === 429) throw new Error('AI rate limit reached — please wait a moment and try again.');
-  if (status >= 500)  throw new Error(`AI service is temporarily unavailable (${status}). Please retry in a few seconds.`);
+  if (status >= 500)  throw new Error(`AI service is temporarily unavailable. Please retry in a few seconds.`);
   if (lastErr?.code === 'ECONNABORTED') throw new Error('AI request timed out (>60 s). Try a shorter input.');
   throw new Error(apiMsg);
 }

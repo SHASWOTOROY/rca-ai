@@ -102,10 +102,16 @@ function RoundCard({ item, index, expanded, onToggle, onDelete }) {
       border: expanded ? `1px solid ${color}40` : '1px solid rgba(255,255,255,0.08)',
       transition: 'border-color .2s',
     }}>
-      <button onClick={onToggle} style={{
-        width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between',
-        padding:'10px 14px', background:'transparent', border:'none', cursor:'pointer',
-      }}>
+      {/* div instead of button — avoids nested <button> inside <button> HTML error */}
+      <div
+        role="button" tabIndex={0}
+        onClick={onToggle}
+        onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && onToggle()}
+        style={{
+          width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between',
+          padding:'10px 14px', background:'transparent', border:'none', cursor:'pointer',
+        }}
+      >
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <div style={{
             width:26, height:26, borderRadius:'50%',
@@ -144,7 +150,7 @@ function RoundCard({ item, index, expanded, onToggle, onDelete }) {
             onMouseLeave={e => e.currentTarget.style.background='rgba(239,68,68,.12)'}
           >✕</button>
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div style={{ padding:'0 14px 14px', borderTop:'1px solid rgba(255,255,255,0.06)' }}>
