@@ -629,19 +629,19 @@ export default function ReportPage({ analyses }) {
   const [loading,     setLoading]     = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [errorMsg,    setErrorMsg]    = useState('');
-  const navigate = useNavigate();
+    const navigate = useNavigate();
 
   const handleGenerate = async () => {
-    setLoading(true);
+        setLoading(true);
     setErrorMsg('');
     try {
       const { data } = await axios.post('/api/generate-report', { analyses });
       setReportData(data.report);
     } catch (err) {
       setErrorMsg(err.response?.data?.error || 'Failed to generate report');
-    }
-    setLoading(false);
-  };
+        }
+        setLoading(false);
+    };
 
   const handleDownload = async () => {
     if (!reportData) return;
@@ -652,9 +652,9 @@ export default function ReportPage({ analyses }) {
       console.error('PDF error', err);
     }
     setDownloading(false);
-  };
+    };
 
-  return (
+    return (
     <div>
       {/* ── top action bar ─────────────────────────────────── */}
       <div style={{

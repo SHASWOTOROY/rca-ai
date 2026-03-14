@@ -1,36 +1,59 @@
 # ── RCA Intelligence Platform — Docker Compose ────────────────────────────────
 #
-#  Services:   backend (Node.js API)  +  frontend (React + Nginx)
+#  Services:   db (PostgreSQL)  +  backend (Node.js API)  +  frontend (React + Nginx)
 #
 #  Architecture:
 #    Browser → :8080 → [frontend nginx] → serves React SPA static files
 #                                       → proxies /api/* to [backend:3001]
-#                                       → [backend] → connects to host Postgres (pgAdmin)
-#
-#  Database:  NOT containerised — uses the PostgreSQL already installed on
-#             the host machine (local PC or EC2), managed by pgAdmin.
-#             Containers reach it via host.docker.internal.
+#                                       → [backend] → connects to [db:5432] container
 #
 #  ┌───────────────────────────────────────────────────────────┐
 #  │  LOCAL DEV (npm run dev)    │  DOCKER (compose up)        │
 #  │  Frontend: localhost:5173   │  Frontend: localhost:8080   │
 #  │  Backend:  localhost:3001   │  Backend:  internal only    │
-#  │  Vite proxy /api → :3001    │  Nginx proxy /api → backend │
+#  │  Postgres: localhost:5432   │  Postgres: db container     │
+#  │  Vite proxy /api → :3001   │  Nginx proxy /api → backend │
 #  └───────────────────────────────────────────────────────────┘
 #
 #  Before first run:
 #    1. Copy  backend/.env.example  →  backend/.env
-#    2. Fill in OPENAI_API_KEY and PGPASSWORD in backend/.env
+#    2. Fill in OPENAI_API_KEY in backend/.env
 #    3. (EC2 only) Change APP_URL below to your EC2 public IP/domain
 #
 #  Commands:
 #    docker compose up --build -d       # build images and start
-#    docker compose up --build          # same but show logs
 #    docker compose logs -f backend     # tail backend logs
-#    docker compose down                # stop and remove containers
-#    docker compose down -v             # stop + wipe volumes
+#    docker compose down                # stop containers
+#    docker compose down -v             # stop + wipe DB volume
 
 services:
+
+  # ── Database — PostgreSQL 16 ─────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: rca_db
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: "1234"
+      POSTGRES_DB:       rca_project
+
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+    expose:
+      - "5432"
+
+    networks:
+      - rca_net
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rca_project"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
 
   # ── Backend — Node.js 22 / Express ──────────────────────────────────────────
   backend:
@@ -41,7 +64,6 @@ services:
     container_name: rca_backend
     restart: unless-stopped
 
-    # Secrets and DB password come from backend/.env (not committed to git)
     env_file:
       - backend/.env
 
@@ -49,49 +71,36 @@ services:
       NODE_ENV:   production
       PORT:       "3001"
 
-      # ── Change this to your server's public URL ────────────────────────────
+      # ── Change this to your EC2 public IP or domain ───────────────────────
       #    Local:  http://localhost:8080
       #    EC2:    http://<YOUR_EC2_PUBLIC_IP>:8080
-      #    Domain: https://yourdomain.com
       APP_URL: "http://localhost:8080"
 
-      # ── Postgres on the host machine (pgAdmin) ─────────────────────────────
-      #    host.docker.internal resolves to the Docker host on both
-      #    Windows/macOS (Docker Desktop) and Linux EC2 (via extra_hosts below).
-      PGHOST:     host.docker.internal
+      # ── Postgres — points to the db container above ───────────────────────
+      PGHOST:     db
       PGPORT:     "5432"
       PGUSER:     postgres
+      PGPASSWORD: "1234"
       PGDATABASE: rca_project
-      # PGPASSWORD  ← loaded from backend/.env — never hard-code here
 
-    extra_hosts:
-      # On Linux (EC2 Ubuntu etc.) Docker doesn't add host.docker.internal
-      # automatically. This line maps it to the host machine's gateway IP.
-      # On Docker Desktop (Windows / macOS) this line is harmless.
-      - "host.docker.internal:host-gateway"
-
-    # Not exposed to the host — only the frontend nginx container talks to it
     expose:
       - "3001"
 
     networks:
       - rca_net
 
+    depends_on:
+      db:
+        condition: service_healthy
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 5s
-      start_period: 15s
-      retries: 3
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
 
   # ── Frontend — React SPA (built by Vite) + Nginx reverse proxy ──────────────
-  #
-  #  This single container does two things:
-  #    1. Serves the compiled React app as static files
-  #    2. Proxies  /api/*  →  backend:3001  (defined in nginx/default.conf)
-  #
-  #  The same nginx/default.conf is used in BOTH local Docker and EC2 —
-  #  no URL changes needed; /api/ is always a relative path from the browser.
   frontend:
     build:
       context: .
@@ -104,15 +113,22 @@ services:
       # ── THE SINGLE ENTRY POINT FOR ALL TRAFFIC ────────────────────────────
       #    Local:  http://localhost:8080
       #    EC2:    http://<EC2_PUBLIC_IP>:8080
-      #            Open port 8080 in your EC2 Security Group inbound rules.
+      #            Open port 8080 in EC2 Security Group inbound rules.
       - "8080:80"
 
     networks:
       - rca_net
 
     depends_on:
+      # service_started (not service_healthy) — frontend nginx can start
+      # immediately; it will keep retrying /api/ calls until backend is ready.
       backend:
-        condition: service_healthy
+        condition: service_started
+
+volumes:
+  pgdata:
+    driver: local
+    name: rca_pgdata
 
 networks:
   rca_net:

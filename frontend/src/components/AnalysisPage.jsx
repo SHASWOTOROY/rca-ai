@@ -305,8 +305,19 @@ export default function AnalysisPage({ analyses, setAnalyses, clearAnalyses }) {
               background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)',
               borderRadius:10, padding:'10px 14px', marginBottom:12,
               color:'#f87171', fontSize:'.85rem',
+              display:'flex', alignItems:'center', justifyContent:'space-between', gap:12,
             }}>
-              ⚠️ {errorMsg}
+              <span>⚠️ {errorMsg}</span>
+              <button
+                onClick={handleAnalyze}
+                style={{
+                  background:'rgba(239,68,68,.25)', border:'1px solid rgba(239,68,68,.5)',
+                  borderRadius:6, color:'#f87171', cursor:'pointer',
+                  fontSize:'.78rem', padding:'3px 10px', whiteSpace:'nowrap', flexShrink:0,
+                }}
+              >
+                ↩ Retry
+              </button>
             </div>
           )}
 

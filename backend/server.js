@@ -12,17 +12,38 @@ const { Pool } = pkg;
 
 // ─── Postgres pool ────────────────────────────────────────────────────────────
 const pool = new Pool({
-  host:     process.env.PGHOST     || 'localhost',
-  port:     Number(process.env.PGPORT) || 5432,
-  user:     process.env.PGUSER     || 'postgres',
-  password: String(process.env.PGPASSWORD || ''),
-  database: process.env.PGDATABASE || 'rca_project',
-  connectionTimeoutMillis: 5000,
+  host:                    process.env.PGHOST     || 'localhost',
+  port:                    Number(process.env.PGPORT) || 5432,
+  user:                    process.env.PGUSER     || 'postgres',
+  password:                String(process.env.PGPASSWORD || ''),
+  database:                process.env.PGDATABASE || 'rca_project',
+  max:                     10,      // max connections in pool
+  idleTimeoutMillis:       30000,   // close idle connections after 30 s
+  connectionTimeoutMillis: 10000,   // wait up to 10 s for a free connection
+  keepAlive:               true,    // send TCP keep-alive to prevent stale connections
+  keepAliveInitialDelayMillis: 10000,
 });
 
+// Log pool errors but DO NOT crash the process — next request will get a fresh connection
 pool.on('error', (err) => {
-  console.error('[DB] Unexpected pool error:', err.message);
+  console.error('[DB] Pool error (connection will be retried):', err.message);
 });
+
+// ─── DB query with one automatic retry ───────────────────────────────────────
+// If the connection is stale the first attempt throws; we destroy it and retry once.
+async function dbQuery(text, params) {
+  try {
+    return await pool.query(text, params);
+  } catch (err) {
+    // Only retry on connection-level errors, not query logic errors
+    if (err.code === 'ECONNRESET' || err.code === 'ECONNREFUSED' || err.message?.includes('terminating')) {
+      console.warn('[DB] Connection error — retrying once:', err.message);
+      await new Promise(r => setTimeout(r, 500));
+      return pool.query(text, params);
+    }
+    throw err;
+  }
+}
 
 async function initDatabase() {
   const client = await pool.connect();
@@ -79,28 +100,67 @@ app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ─── OpenAI helper ────────────────────────────────────────────────────────────
-async function callOpenAI(messages) {
+// ─── OpenRouter/OpenAI helper with automatic retry ───────────────────────────
+async function callOpenAI(messages, { maxRetries = 2 } = {}) {
   const key = process.env.OPENAI_API_KEY;
   if (!key || key === 'PUT_YOUR_OPENAI_KEY_HERE') {
-    throw new Error('OPENAI_API_KEY is not configured in backend/.env');
+    throw new Error('AI key not configured — add OPENAI_API_KEY to backend/.env');
   }
 
-  const response = await axios.post(
-    'https://openrouter.ai/api/v1/chat/completions',
-    { model: 'openai/gpt-4o-mini', messages, temperature: 0.2 },
-    {
-      headers: {
-        Authorization:  `Bearer ${key}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer':  'http://localhost:3001',
-        'X-Title':       'RCA Analysis Tool',
-      },
-      timeout: 60000,
-    },
-  );
+  let lastErr;
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    try {
+      const response = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        { model: 'openai/gpt-4o-mini', messages, temperature: 0.2 },
+        {
+          headers: {
+            Authorization:  `Bearer ${key}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer':  'http://localhost:3001',
+            'X-Title':       'RCA Analysis Tool',
+          },
+          timeout: 60000,
+        },
+      );
 
-  return response.data?.choices?.[0]?.message?.content ?? '';
+      const content = response.data?.choices?.[0]?.message?.content;
+      if (!content) throw new Error('AI returned an empty response — please try again.');
+      return content;
+
+    } catch (err) {
+      lastErr = err;
+      const status = err.response?.status;
+      const apiMsg = err.response?.data?.error?.message
+                  || err.response?.data?.error
+                  || err.message;
+
+      // Don't retry on auth / bad-request errors — these won't self-heal
+      if (status === 401) throw new Error('Invalid API key. Check OPENAI_API_KEY in backend/.env');
+      if (status === 403) throw new Error('API key forbidden. Check your OpenRouter account/credits.');
+      if (status === 400) throw new Error(`Bad request to AI: ${apiMsg}`);
+
+      if (attempt <= maxRetries) {
+        const delay = attempt * 1500; // 1.5 s, then 3 s
+        console.warn(`[AI] Attempt ${attempt} failed (${status ?? 'network'}: ${apiMsg}) — retrying in ${delay}ms…`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        console.error(`[AI] All ${maxRetries + 1} attempts failed. Last error: ${apiMsg}`);
+      }
+    }
+  }
+
+  // Produce a clean user-facing message from the last error
+  const status = lastErr?.response?.status;
+  const apiMsg = lastErr?.response?.data?.error?.message
+              || lastErr?.response?.data?.error
+              || lastErr?.message
+              || 'Unknown error';
+
+  if (status === 429) throw new Error('AI rate limit reached — please wait a moment and try again.');
+  if (status >= 500)  throw new Error(`AI service is temporarily unavailable (${status}). Please retry in a few seconds.`);
+  if (lastErr?.code === 'ECONNABORTED') throw new Error('AI request timed out (>60 s). Try a shorter input.');
+  throw new Error(apiMsg);
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -108,7 +168,7 @@ async function callOpenAI(messages) {
 // Health check
 app.get('/health', async (_req, res) => {
   try {
-    await pool.query('SELECT 1');
+    await dbQuery('SELECT 1');
     res.json({ status: 'ok', db: 'connected' });
   } catch (err) {
     res.status(500).json({ status: 'error', db: err.message });
@@ -153,7 +213,7 @@ app.post('/api/analyze', upload.single('logFile'), async (req, res) => {
 
     console.log('[Analyze] AI responded, length:', analysis.length);
 
-    const { rows } = await pool.query(
+    const { rows } = await dbQuery(
       `INSERT INTO analyses (log_content, error_code, ai_analysis)
        VALUES ($1, $2, $3)
        RETURNING id, ai_analysis, created_at`,
@@ -164,8 +224,7 @@ app.post('/api/analyze', upload.single('logFile'), async (req, res) => {
     return res.json({ id: row.id, analysis: row.ai_analysis, createdAt: row.created_at });
   } catch (err) {
     console.error('[Analyze] Error:', err.message);
-    const userMsg = err.response?.data?.error?.message || err.message;
-    return res.status(500).json({ error: userMsg });
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -244,13 +303,12 @@ Return this exact structure:
 
     console.log('[Report] Structured report ready, issues:', reportData.issues?.length);
 
-    await pool.query('INSERT INTO reports (report) VALUES ($1)', [JSON.stringify(reportData)]);
+    await dbQuery('INSERT INTO reports (report) VALUES ($1)', [JSON.stringify(reportData)]);
 
     return res.json({ report: reportData });
   } catch (err) {
     console.error('[Report] Error:', err.message);
-    const userMsg = err.response?.data?.error?.message || err.message;
-    return res.status(500).json({ error: userMsg });
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -275,4 +333,15 @@ server.on('error', (err) => {
 initDatabase().catch((err) => {
   console.error('[DB] Schema init failed:', err.message);
   console.error('     → Check PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE in backend/.env');
+});
+
+// ─── Global crash guards ──────────────────────────────────────────────────────
+// Prevent the process from dying on unhandled async errors.
+// Without these, a single bad request can kill the entire server.
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Unhandled Promise Rejection — server kept alive:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught Exception — server kept alive:', err.message);
 });
