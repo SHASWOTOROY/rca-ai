@@ -8,7 +8,7 @@ const STORAGE_KEY = 'rca_analyses';
 function Header() {
   const loc = useLocation();
   return (
-    <header style={{
+    <header className="app-header" style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       padding: '14px 32px',
       background: 'rgba(8,11,20,0.85)',
@@ -77,7 +77,7 @@ function AppInner() {
   return (
     <>
       <Header />
-      <main style={{ flex:1, padding:'28px 32px', maxWidth:1400, margin:'0 auto', width:'100%' }}>
+      <main className="app-main" style={{ flex:1, padding:'28px 32px', maxWidth:1400, margin:'0 auto', width:'100%' }}>
         <Routes>
           <Route path="/"       element={<AnalysisPage analyses={analyses} setAnalyses={setAnalyses} clearAnalyses={clearAnalyses} />} />
           <Route path="/report" element={<ReportPage   analyses={analyses} />} />

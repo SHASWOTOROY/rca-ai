@@ -195,7 +195,7 @@ export default function AnalysisPage({ analyses, setAnalyses, clearAnalyses }) {
       fd.append('errorCode',  errorCode);
       if (file) fd.append('logFile', file);
 
-      const { data } = await axios.post('/api/analyze', fd);
+      const { data } = await axios.post('/api/analyze', fd, { timeout: 120000 });
       const entry = { ...data, logContent, errorCode, timestamp: new Date().toLocaleTimeString() };
       setAnalyses(prev => [...prev, entry]);
       setLatestResult(entry);
@@ -204,9 +204,13 @@ export default function AnalysisPage({ analyses, setAnalyses, clearAnalyses }) {
       setFile(null);
       if (fileRef.current) fileRef.current.value = '';
     } catch (err) {
-      setErrorMsg(err.response?.data?.error || 'Analysis failed — is the backend running?');
+      const msg = err.code === 'ECONNABORTED'
+        ? 'Request timed out. Check your connection and try again.'
+        : (err.response?.data?.error || err.message || 'Analysis failed — is the backend running?');
+      setErrorMsg(msg);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const canAnalyze = !loading && (logContent.trim() || errorCode.trim() || file);
@@ -231,10 +235,10 @@ export default function AnalysisPage({ analyses, setAnalyses, clearAnalyses }) {
   };
 
   return (
-    <div style={{ display:'flex', gap:24, alignItems:'flex-start' }}>
+    <div className="analysis-page-layout" style={{ display:'flex', gap:24, alignItems:'flex-start' }}>
 
       {/* ── LEFT: Input + Result ─────────────────────────────── */}
-      <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:20 }}>
+      <div className="analysis-main-col" style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:20 }}>
 
         {/* Page title */}
         <div>
@@ -405,8 +409,8 @@ export default function AnalysisPage({ analyses, setAnalyses, clearAnalyses }) {
       </div>
 
       {/* ── RIGHT: History + Generate report ─────────────────── */}
-      <div style={{ width:310, flexShrink:0 }}>
-        <div className="glass" style={{ padding:20, position:'sticky', top:80 }}>
+      <div className="analysis-history-panel" style={{ width:310, flexShrink:0 }}>
+        <div className="glass analysis-history-inner" style={{ padding:20, position:'sticky', top:80 }}>
           <div style={{ marginBottom:16, paddingBottom:12, borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:2 }}>
               <div style={{ fontWeight:700, fontSize:'.95rem' }}>Analysis History</div>
@@ -444,7 +448,7 @@ export default function AnalysisPage({ analyses, setAnalyses, clearAnalyses }) {
             </div>
           )}
 
-          <div style={{ maxHeight:460, overflowY:'auto', paddingRight:2 }}>
+          <div className="analysis-history-list" style={{ maxHeight:460, overflowY:'auto', paddingRight:2 }}>
             {analyses.map((item, i) => (
               <RoundCard
                 key={i} item={item} index={i}

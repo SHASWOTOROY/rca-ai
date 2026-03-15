@@ -655,9 +655,9 @@ export default function ReportPage({ analyses }) {
     };
 
     return (
-    <div>
+    <div className="report-page-layout">
       {/* ── top action bar ─────────────────────────────────── */}
-      <div style={{
+      <div className="report-page-actions" style={{
         display:'flex', alignItems:'center', justifyContent:'space-between',
         marginBottom:24, flexWrap:'wrap', gap:12,
       }}>

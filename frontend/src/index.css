@@ -255,3 +255,113 @@ body {
   border-radius: 50%;
   animation: spin .7s linear infinite;
 }
+
+/* ── Mobile responsive UI ───────────────────────────────────── */
+@media (max-width: 900px) {
+  .app-header {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 20px !important;
+  }
+  .app-header > div:first-child {
+    min-width: 0;
+  }
+  .app-header .gradient-text,
+  .app-header > div:first-child > div > div:last-child {
+    font-size: 0.9rem !important;
+  }
+  .app-main {
+    padding: 16px 20px !important;
+  }
+  .analysis-page-layout {
+    flex-direction: column !important;
+    gap: 20px !important;
+  }
+  .analysis-main-col {
+    min-width: 0 !important;
+  }
+  .analysis-main-col h1 {
+    font-size: 1.35rem !important;
+  }
+  .analysis-main-col p {
+    font-size: 0.82rem !important;
+  }
+  .analysis-history-panel {
+    width: 100% !important;
+    order: 2;
+  }
+  .analysis-history-inner {
+    position: static !important;
+    max-height: none;
+  }
+  .analysis-history-list {
+    max-height: 320px !important;
+  }
+  .glass[style*="padding:24"] {
+    padding: 18px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    padding: 10px 14px !important;
+  }
+  .app-header > div:first-child > div > div:first-child {
+    font-size: 0.65rem !important;
+  }
+  .app-header > div:first-child > div > div:last-child {
+    font-size: 0.8rem !important;
+  }
+  .app-header > div:last-child {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .badge {
+    font-size: 10px !important;
+    padding: 2px 8px !important;
+  }
+  .app-main {
+    padding: 12px 14px !important;
+  }
+  .analysis-main-col h1 {
+    font-size: 1.2rem !important;
+  }
+  .glass[style*="padding:24"],
+  .glass[style*="padding:20"] {
+    padding: 14px !important;
+  }
+  .btn {
+    padding: 8px 14px !important;
+    font-size: 0.8rem !important;
+  }
+  .input-field {
+    padding: 10px 12px !important;
+    font-size: 0.85rem !important;
+  }
+  textarea.input-field {
+    min-height: 100px;
+    rows: 5;
+  }
+  .report-page-actions {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .report-page-actions > div:last-child {
+    justify-content: stretch;
+  }
+  .report-page-actions .btn {
+    flex: 1;
+    justify-content: center;
+  }
+  #report-preview {
+    margin: 0 -4px;
+    border-radius: 8px;
+    overflow-x: auto;
+  }
+  #report-preview > div:first-child {
+    padding: 20px 16px !important;
+  }
+  #report-preview > div:last-child {
+    padding: 20px 16px !important;
+  }
+}
